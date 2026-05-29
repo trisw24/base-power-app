@@ -482,57 +482,67 @@
     return `⚡ *BASE Power Leaderboard* | Week of ${startLabel} – ${endLabel}\n\n${rows}\n\n─────────────────\n📊 Team Total: *${totals.total}* sales  ⚡${totals.energy} · 🔋${totals.battery}\n_Updated ${updatedAt}_`;
   }
 
-  // Load persisted Slack message ts (localStorage primary, Supabase fallback)
+  // Get the Monday date key for the current week
+  function currentWeekKey() {
+    const { start } = getWeekBounds();
+    return start;
+  }
+
+  // Load persisted Slack message ts — keyed per week so new weeks get fresh messages
   async function loadSlackTs() {
-    // Try localStorage first (fast, same-device)
-    const local = localStorage.getItem("slack_leaderboard_ts");
+    const weekKey = currentWeekKey();
+    const storageKey = `slack_ts_${weekKey}`;
+    // Try localStorage first
+    const local = localStorage.getItem(storageKey);
     if (local) { slackPinnedMessageTs = local; return; }
-    // Fall back to Supabase (cross-device)
+    // Fall back to Supabase
     try {
-      const rows = await dbFetch(`settings?key=eq.slack_leaderboard_ts`);
+      const rows = await dbFetch(`settings?key=eq.${storageKey}`);
       if (rows.length && rows[0].value) {
         slackPinnedMessageTs = rows[0].value;
-        localStorage.setItem("slack_leaderboard_ts", rows[0].value);
+        localStorage.setItem(storageKey, rows[0].value);
       }
     } catch(e) {}
   }
 
   async function saveSlackTs(ts) {
-    localStorage.setItem("slack_leaderboard_ts", ts);
+    const weekKey = currentWeekKey();
+    const storageKey = `slack_ts_${weekKey}`;
+    localStorage.setItem(storageKey, ts);
     try {
-      const rows = await dbFetch(`settings?key=eq.slack_leaderboard_ts`);
+      const rows = await dbFetch(`settings?key=eq.${storageKey}`);
       if (rows.length) {
-        await dbFetch(`settings?key=eq.slack_leaderboard_ts`, { method: "PATCH", body: JSON.stringify({ value: ts }) });
+        await dbFetch(`settings?key=eq.${storageKey}`, { method: "PATCH", body: JSON.stringify({ value: ts }) });
       } else {
-        await dbFetch(`settings`, { method: "POST", body: JSON.stringify({ key: "slack_leaderboard_ts", value: ts }) });
+        await dbFetch(`settings`, { method: "POST", body: JSON.stringify({ key: storageKey, value: ts }) });
       }
     } catch(e) {}
   }
 
-  // Post or update the pinned Slack leaderboard message
+  // Post or update the Slack leaderboard — new message each week, updates within the week
   async function pushSlackLeaderboard() {
     try {
       const text = await buildLeaderboardText();
 
-      // Load ts from Supabase if not in memory
+      // Load ts for THIS week from storage
       if (!slackPinnedMessageTs) await loadSlackTs();
 
       if (slackPinnedMessageTs) {
-        // Update existing message via serverless proxy
+        // Update this week's existing message
         const res = await fetch("/.netlify/functions/slack", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ endpoint: "chat.update", payload: { channel: SLACK_CHANNEL, ts: slackPinnedMessageTs, text } })
         });
         const data = await res.json();
-        // If message no longer exists, reset and repost
+        // If message no longer exists, clear and repost
         if (!data.ok) {
           slackPinnedMessageTs = null;
           await saveSlackTs("");
           await pushSlackLeaderboard();
         }
       } else {
-        // Post new message via serverless proxy
+        // Post a new message for this week
         const postRes = await fetch("/.netlify/functions/slack", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
