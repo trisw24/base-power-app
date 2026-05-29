@@ -330,7 +330,17 @@
     </div>
     <div class="form-card">
       <label class="label">Your Name</label>
-      <input type="text" id="rep-name" placeholder="First & Last Name" oninput="updateSummary()" />
+      <div style="position:relative">
+        <input type="text" id="rep-name" placeholder="First & Last Name" 
+          oninput="updateSummary(); showRepSuggestions()" 
+          onblur="setTimeout(hideRepSuggestions, 150)"
+          autocomplete="off" />
+        <div id="rep-suggestions" style="
+          display:none; position:absolute; top:100%; left:0; right:0; z-index:100;
+          background:#0d1117; border:1px solid #2563eb; border-radius:0 0 8px 8px;
+          max-height:180px; overflow-y:auto;
+        "></div>
+      </div>
     </div>
     <div class="form-card">
       <label class="label">Submission Date</label>
@@ -643,6 +653,49 @@
     return { total: customers.length, energy, battery };
   }
 
+  // Normalize rep name: trim, title-case each word
+  function normalizeName(name) {
+    return name.trim().replace(/\s+/g, " ")
+      .replace(/\w/g, c => c.toUpperCase());
+  }
+
+  // Autocomplete from known rep names in Supabase
+  let allRepNames = [];
+  async function loadRepNames() {
+    try {
+      const all = await getAllSubmissions();
+      const names = [...new Set(all.map(s => s.rep))].sort();
+      allRepNames = names;
+    } catch(e) {}
+  }
+
+  function showRepSuggestions() {
+    const input = document.getElementById("rep-name");
+    const box = document.getElementById("rep-suggestions");
+    const val = input.value.trim().toLowerCase();
+    if (!val) { box.style.display = "none"; return; }
+    const matches = allRepNames.filter(n => n.toLowerCase().includes(val));
+    if (matches.length === 0) { box.style.display = "none"; return; }
+    box.innerHTML = matches.map(n => `
+      <div onclick="selectRepName('${n}')" style="
+        padding:10px 14px; font-size:14px; cursor:pointer; color:#f0f0f0;
+        border-bottom:1px solid #1f2937;
+      " onmouseover="this.style.background='#1f2937'" onmouseout="this.style.background=''">${n}</div>
+    `).join("");
+    box.style.display = "block";
+  }
+
+  function selectRepName(name) {
+    document.getElementById("rep-name").value = name;
+    hideRepSuggestions();
+    updateSummary();
+  }
+
+  function hideRepSuggestions() {
+    const box = document.getElementById("rep-suggestions");
+    if (box) box.style.display = "none";
+  }
+
   // ── VIEWS ──────────────────────────────────────────────────────────────────
   const views = ["home","submit","conflict","success","admin-login","admin"];
   function showView(name) {
@@ -676,7 +729,7 @@
       opt.value = d.key; opt.textContent = d.label; sel.appendChild(opt);
     });
     document.getElementById("backdated-banner").style.display = "none";
-    addCustomer(); updateSummary(); showView("submit");
+    loadRepNames(); addCustomer(); updateSummary(); showView("submit");
   }
 
   function onDateChange() {
@@ -752,7 +805,7 @@
   // ── SUBMIT ─────────────────────────────────────────────────────────────────
   async function handleSubmit() {
     const btn = document.getElementById("submit-btn");
-    const repName = document.getElementById("rep-name").value.trim();
+    const repName = normalizeName(document.getElementById("rep-name").value);
     const customers = getCustomers();
     const selectedDate = document.getElementById("submission-date").value;
     if (!repName || customers.length === 0) return;
