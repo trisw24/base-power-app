@@ -431,7 +431,7 @@
   const ADMIN_PIN = "1234";
 
   // ── SLACK CONFIG ───────────────────────────────────────────────────────────
-  const SLACK_TOKEN = "xoxb-11197027561602-11263337774848-fGc6iTXPzD4Nkx9EfinKOzJa";
+  const SLACK_TOKEN = null; // Token is stored securely in Netlify environment variables
   const SLACK_CHANNEL = "C0B6QL046TD";
   let slackPinnedMessageTs = null; // stores the ts of the pinned leaderboard message
 
@@ -518,11 +518,11 @@
       if (!slackPinnedMessageTs) await loadSlackTs();
 
       if (slackPinnedMessageTs) {
-        // Update existing message
-        const res = await fetch("https://slack.com/api/chat.update", {
+        // Update existing message via serverless proxy
+        const res = await fetch("/.netlify/functions/slack", {
           method: "POST",
-          headers: { "Authorization": `Bearer ${SLACK_TOKEN}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ channel: SLACK_CHANNEL, ts: slackPinnedMessageTs, text })
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ endpoint: "chat.update", payload: { channel: SLACK_CHANNEL, ts: slackPinnedMessageTs, text } })
         });
         const data = await res.json();
         // If message no longer exists, reset and repost
@@ -532,11 +532,11 @@
           await pushSlackLeaderboard();
         }
       } else {
-        // Post new message and persist its ts
-        const postRes = await fetch("https://slack.com/api/chat.postMessage", {
+        // Post new message via serverless proxy
+        const postRes = await fetch("/.netlify/functions/slack", {
           method: "POST",
-          headers: { "Authorization": `Bearer ${SLACK_TOKEN}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ channel: SLACK_CHANNEL, text })
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ endpoint: "chat.postMessage", payload: { channel: SLACK_CHANNEL, text } })
         });
         const posted = await postRes.json();
         if (posted.ok) {
