@@ -823,10 +823,15 @@
         btn.disabled = false; btn.textContent = "Submit Check-In ⚡"; return;
       }
       const { total, energy, battery } = calcStats(customers);
+      const now = new Date();
+      const submittedDate = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+      const submittedTime = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+      // Use the device's current date for "today" submissions to keep date/time in sync
+      const finalDate = selectedDate === todayKey() ? submittedDate : selectedDate;
       await insertSubmission({
         rep: repName,
-        time: new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
-        date: selectedDate, customers, enrollments: energy, batteries: battery,
+        time: submittedTime,
+        date: finalDate, customers, enrollments: energy, batteries: battery,
       });
       const dateLabel = selectedDate === todayKey() ? "today" : formatDateLabel(selectedDate);
       document.getElementById("success-title").textContent = "Submitted!";
