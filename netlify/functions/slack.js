@@ -4,8 +4,22 @@ exports.handler = async function(event) {
   }
 
   const SLACK_TOKEN = process.env.SLACK_TOKEN;
-  const body = JSON.parse(event.body);
+  
+  if (!SLACK_TOKEN) {
+    console.error("SLACK_TOKEN is not set");
+    return { statusCode: 500, body: JSON.stringify({ ok: false, error: "SLACK_TOKEN not configured" }) };
+  }
+
+  let body;
+  try {
+    body = JSON.parse(event.body);
+  } catch(e) {
+    return { statusCode: 400, body: JSON.stringify({ ok: false, error: "Invalid JSON" }) };
+  }
+
   const { endpoint, payload } = body;
+  console.log("Calling Slack endpoint:", endpoint);
+  console.log("Payload:", JSON.stringify(payload));
 
   const res = await fetch(`https://slack.com/api/${endpoint}`, {
     method: "POST",
@@ -17,6 +31,8 @@ exports.handler = async function(event) {
   });
 
   const data = await res.json();
+  console.log("Slack response:", JSON.stringify(data));
+  
   return {
     statusCode: 200,
     headers: { "Content-Type": "application/json" },
