@@ -79,13 +79,13 @@
     .section-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
     .label-sub { font-size: 11px; color: #4b5563; }
 
-    input[type="text"], input[type="password"] {
+    input[type="text"], input[type="password"], input[type="email"], input[type="tel"] {
       width: 100%; background: #0a0f1a;
       border: 1px solid #1f2d3d; border-radius: 8px;
       padding: 12px 14px; color: #f0f0f0;
       font-size: 15px; outline: none; font-family: inherit;
     }
-    input[type="text"]:focus, input[type="password"]:focus { border-color: #2563eb; }
+    input[type="text"]:focus, input[type="password"]:focus, input[type="email"]:focus, input[type="tel"]:focus { border-color: #2563eb; }
 
     .date-select-wrapper { position: relative; }
     .date-select-wrapper::after {
@@ -111,6 +111,18 @@
       background: none; border: none; color: #6b7280;
       font-size: 18px; cursor: pointer; padding: 0 2px; line-height: 1; flex-shrink: 0;
     }
+
+    /* Customer contact fields */
+    .contact-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+    .contact-fields input { width: 100%; min-width: 0; }
+    .contact-fields .full { grid-column: 1 / -1; }
+    .admin-contact { font-size: 11px; color: #6b7280; padding: 0 0 6px 18px; line-height: 1.5; word-break: break-all; }
+    .admin-contact a { color: #60a5fa; text-decoration: none; }
+    .edit-customer-btn { background: none; border: none; color: #4b5563; font-size: 13px; cursor: pointer; padding: 0 2px; flex-shrink: 0; }
+    .edit-customer-btn:hover { color: #60a5fa; }
+    .admin-edit-row { display: none; gap: 6px; flex-wrap: wrap; padding: 0 0 8px 18px; }
+    .admin-edit-row.open { display: flex; }
+    .admin-edit-row input { flex: 1; min-width: 120px; background: #0a0f1a; border: 1px solid #1f2d3d; border-radius: 6px; padding: 7px 10px; color: #f0f0f0; font-size: 13px; outline: none; font-family: inherit; }
 
     /* Sale type selector */
     .sale-type-row { display: flex; gap: 6px; }
@@ -646,6 +658,25 @@
     if (TYPES[t]) return TYPES[t].short;
     return "Energy Enrollment";
   }
+  // Contact field helpers
+  function esc(v) { return String(v ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch])); }
+  function cleanEsid(v) { return String(v || "").replace(/\D/g, "").slice(0, 22); }
+  function formatPhone(v) {
+    let d = String(v || "").replace(/\D/g, "");
+    if (d.length === 11 && d[0] === "1") d = d.slice(1);
+    d = d.slice(0, 10);
+    if (d.length < 4) return d;
+    if (d.length < 7) return `(${d.slice(0,3)}) ${d.slice(3)}`;
+    return `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`;
+  }
+  function contactLine(c) {
+    const parts = [];
+    if (c.email) parts.push(`✉️ <a href="mailto:${esc(c.email)}">${esc(c.email)}</a>`);
+    if (c.phone) parts.push(`📞 <a href="tel:${esc(String(c.phone).replace(/\D/g,""))}">${esc(c.phone)}</a>`);
+    if (c.esid) parts.push(`🔌 ESID ${esc(c.esid)}`);
+    return parts.length ? parts.join(" &nbsp;·&nbsp; ") : `<span style="color:#374151">No contact info</span>`;
+  }
+
   // Calc stats from customers array
   function calcStats(customers) {
     const energy = customers.filter(c => { const t = resolvedType(c); return t === "energy" || t === "both"; }).length;
@@ -764,6 +795,11 @@
         <button class="type-btn" id="ctype-${id}-battery" onclick="setType(${id},'battery')">🔋<br>Battery Only</button>
         <button class="type-btn" id="ctype-${id}-both" onclick="setType(${id},'both')">⚡🔋<br>Both</button>
       </div>
+      <div class="contact-fields">
+        <input type="email" placeholder="Customer email" id="cemail-${id}" autocomplete="off" autocapitalize="off" />
+        <input type="tel" placeholder="Phone number" id="cphone-${id}" inputmode="tel" autocomplete="off" oninput="this.value=formatPhone(this.value)" />
+        <input type="text" class="full" placeholder="Meter ESID # (17 or 22 digits)" id="cesid-${id}" inputmode="numeric" autocomplete="off" oninput="this.value=cleanEsid(this.value)" />
+      </div>
     `;
     // Default selection
     entry.dataset.saleType = "energy";
@@ -788,7 +824,13 @@
     document.querySelectorAll(".customer-entry").forEach(entry => {
       const id = entry.id.match(/ce-(\d+)/)?.[1]; if (!id) return;
       const nameEl = document.getElementById("cname-"+id);
-      if (nameEl?.value.trim()) result.push({ name: nameEl.value.trim(), saleType: entry.dataset.saleType || "energy" });
+      if (nameEl?.value.trim()) result.push({
+        name: nameEl.value.trim(),
+        saleType: entry.dataset.saleType || "energy",
+        email: (document.getElementById("cemail-"+id)?.value || "").trim().toLowerCase(),
+        phone: formatPhone(document.getElementById("cphone-"+id)?.value || ""),
+        esid: cleanEsid(document.getElementById("cesid-"+id)?.value || "")
+      });
     });
     return result;
   }
@@ -940,7 +982,16 @@
           <option value="battery" ${resolvedType(c)==="battery"?"selected":""}>🔋 Battery</option>
           <option value="both" ${resolvedType(c)==="both"?"selected":""}>⚡🔋 Both</option>
         </select>
+        <button class="edit-customer-btn" onclick="toggleEditCustomer('${entry.id}',${i})" title="Edit contact info">✏️</button>
         <button class="del-customer-btn" onclick="adminDeleteCustomer('${entry.id}',${i})" title="Remove">✕</button>
+      </div>
+      <div class="admin-contact">${contactLine(c)}</div>
+      <div class="admin-edit-row" id="aedit-${entry.id}-${i}">
+        <input type="text" id="ename-${entry.id}-${i}" value="${esc(c.name)}" placeholder="Customer name" />
+        <input type="email" id="eemail-${entry.id}-${i}" value="${esc(c.email || "")}" placeholder="Email" />
+        <input type="tel" id="ephone-${entry.id}-${i}" value="${esc(c.phone || "")}" placeholder="Phone" oninput="this.value=formatPhone(this.value)" />
+        <input type="text" id="eesid-${entry.id}-${i}" value="${esc(c.esid || "")}" placeholder="ESID #" inputmode="numeric" oninput="this.value=cleanEsid(this.value)" />
+        <button class="admin-add-confirm" onclick="adminSaveCustomer('${entry.id}',${i})">Save</button>
       </div>
     `).join("");
 
@@ -962,6 +1013,9 @@
           ${customerLines}
           <div class="admin-add-row">
             <input type="text" placeholder="Add customer name..." id="newcust-${entry.id}" />
+            <input type="email" placeholder="Email" id="newemail-${entry.id}" />
+            <input type="tel" placeholder="Phone" id="newphone-${entry.id}" oninput="this.value=formatPhone(this.value)" />
+            <input type="text" placeholder="ESID #" id="newesid-${entry.id}" inputmode="numeric" oninput="this.value=cleanEsid(this.value)" />
             <select class="admin-add-type" id="newtype-${entry.id}">
               <option value="energy">⚡ Energy</option>
               <option value="battery">🔋 Battery</option>
@@ -1026,13 +1080,41 @@
       const rows = await dbFetch(`submissions?id=eq.${entryId}`);
       if (!rows.length) return;
       const entry = rows[0];
-      const updated = [...entry.customers, { name, saleType }];
+      const updated = [...entry.customers, {
+        name, saleType,
+        email: (document.getElementById("newemail-"+entryId)?.value || "").trim().toLowerCase(),
+        phone: formatPhone(document.getElementById("newphone-"+entryId)?.value || ""),
+        esid: cleanEsid(document.getElementById("newesid-"+entryId)?.value || "")
+      }];
       const { energy, battery } = calcStats(updated);
       await updateSubmission(entryId, { customers: updated, enrollments: energy, batteries: battery });
       refreshEntryCard(entryId, { ...entry, customers: updated, enrollments: energy, batteries: battery });
       await refreshAdminTotals();
       pushSlackLeaderboard();
     } catch(e) { alert("Error adding customer."); }
+  }
+
+  function toggleEditCustomer(entryId, idx) {
+    document.getElementById(`aedit-${entryId}-${idx}`)?.classList.toggle("open");
+  }
+
+  async function adminSaveCustomer(entryId, idx) {
+    const val = k => (document.getElementById(`${k}-${entryId}-${idx}`)?.value || "").trim();
+    const name = val("ename");
+    if (!name) { alert("Customer name can't be blank."); return; }
+    try {
+      const rows = await dbFetch(`submissions?id=eq.${entryId}`);
+      if (!rows.length) return;
+      const entry = rows[0];
+      const updated = entry.customers.map((c,i) => i === idx ? {
+        ...c, name,
+        email: val("eemail").toLowerCase(),
+        phone: formatPhone(val("ephone")),
+        esid: cleanEsid(val("eesid"))
+      } : c);
+      await updateSubmission(entryId, { customers: updated });
+      refreshEntryCard(entryId, { ...entry, customers: updated });
+    } catch(e) { alert("Error saving customer."); }
   }
 
   function refreshEntryCard(entryId, entry) {
@@ -1061,7 +1143,7 @@
     try {
       const all = await getAllSubmissions();
       if (all.length === 0) { alert("No submissions to export."); return; }
-      const rows = [["Week Ending", "Date", "Rep Name", "Customer Name", "Sale Type", "Submitted At"]];
+      const rows = [["Week Ending", "Date", "Rep Name", "Customer Name", "Sale Type", "Customer Email", "Customer Phone", "Meter ESID", "Submitted At"]];
       all.forEach(entry => {
         const weekEnding = getWeekEnding(entry.date);
         const dateLabel = formatDateLabel(entry.date);
@@ -1072,6 +1154,9 @@
             entry.rep,
             c.name,
             resolveSaleType(c),
+            c.email || "",
+            c.phone || "",
+            c.esid ? `="${c.esid}"` : "",
             entry.time
           ]);
         });
