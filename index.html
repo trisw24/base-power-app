@@ -441,12 +441,13 @@
         <div class="admin-stat"><span class="admin-stat-num" style="color:#9ca3af" id="admin-reps">—</span>Reps In</div>
       </div>
     </div>
-    <button class="export-btn" onclick="exportCSV()">⬇️ Export to CSV</button>
+    <button class="export-btn" onclick="exportCSV()">⬇️ Export to Excel</button>
     <div id="admin-days"><div class="loading">Loading submissions...</div></div>
   </div>
 
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
   const SUPABASE_URL = "https://vpzmtimqviohidzyipbt.supabase.co";
   const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZwem10aW1xdmlvaGlkenlpcGJ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2MzYwOTksImV4cCI6MjA5NTIxMjA5OX0.v8clyzZMzr3glZN-6prnuPJrXmOT8JfJ3mgDTJ--N_E";
@@ -1139,35 +1140,69 @@
   }
 
   // ── EXPORT CSV ─────────────────────────────────────────────────────────────
+  // Monday (YYYY-MM-DD) of the week containing dateStr — pay period is Mon–Sun
+  function getWeekStartKey(dateStr) {
+    const d = new Date(dateStr + "T12:00:00");
+    const day = d.getDay();
+    d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day));
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
+  function weekTabName(monKey) {
+    const mon = new Date(monKey + "T12:00:00");
+    const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+    const f = d => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    return `${f(mon)} - ${f(sun)}`.replace(/[\\/?*\[\]:]/g, "");
+  }
+
   async function exportCSV() {
     try {
+      if (typeof XLSX === "undefined") { alert("Excel library didn't load. Check your connection and try again."); return; }
       const all = await getAllSubmissions();
       if (all.length === 0) { alert("No submissions to export."); return; }
-      const rows = [["Week Ending", "Date", "Rep Name", "Customer Name", "Sale Type", "Customer Email", "Customer Phone", "Meter ESID", "Submitted At"]];
+
+      const header = ["Week Ending", "Date", "Rep Name", "Customer Name", "Sale Type", "Customer Email", "Customer Phone", "Meter ESID", "Submitted At"];
+      const weeks = {};
       all.forEach(entry => {
-        const weekEnding = getWeekEnding(entry.date);
-        const dateLabel = formatDateLabel(entry.date);
+        const wk = getWeekStartKey(entry.date);
+        if (!weeks[wk]) weeks[wk] = [];
         entry.customers.forEach(c => {
-          rows.push([
-            weekEnding,
-            dateLabel,
+          weeks[wk].push([
+            getWeekEnding(entry.date),
+            formatDateLabel(entry.date),
             entry.rep,
             c.name,
             resolveSaleType(c),
             c.email || "",
             c.phone || "",
-            c.esid ? `="${c.esid}"` : "",
+            c.esid || "",
             entry.time
           ]);
         });
       });
-      const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
-      const blob = new Blob([csv], { type: "text/csv" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = `HighRange-BASE-Submissions-${todayKey()}.csv`;
-      a.click(); URL.revokeObjectURL(url);
-    } catch(e) { alert("Error exporting."); }
+
+      const wb = XLSX.utils.book_new();
+      const summary = [["Week (Mon–Sun)", "Total Sales", "Energy", "Battery", "Reps"]];
+      Object.keys(weeks).sort().reverse().forEach(wk => {
+        const rows = weeks[wk].sort((a,b) => new Date(a[1]) - new Date(b[1]) || a[2].localeCompare(b[2]));
+        const energy = rows.filter(r => r[4] !== TYPES.battery.short).length;
+        const battery = rows.filter(r => r[4] !== TYPES.energy.short).length;
+        const reps = new Set(rows.map(r => r[2])).size;
+        const data = [header, ...rows, [], ["TOTALS", "", `${reps} reps`, `${rows.length} sales`, `${energy} energy / ${battery} battery`]];
+        const ws = XLSX.utils.aoa_to_sheet(data);
+        ws["!cols"] = [14, 14, 20, 24, 20, 28, 16, 24, 12].map(w => ({ wch: w }));
+        // keep ESID as text so Excel doesn't mangle long numbers
+        for (let r = 1; r <= rows.length; r++) { const cell = ws[XLSX.utils.encode_cell({ r, c: 7 })]; if (cell) cell.t = "s"; }
+        XLSX.utils.book_append_sheet(wb, ws, weekTabName(wk).slice(0, 31));
+        summary.push([weekTabName(wk), rows.length, energy, battery, reps]);
+      });
+      const sws = XLSX.utils.aoa_to_sheet(summary);
+      sws["!cols"] = [{ wch: 18 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 8 }];
+      XLSX.utils.book_append_sheet(wb, sws, "Summary");
+      // Put Summary first
+      wb.SheetNames.unshift(wb.SheetNames.pop());
+
+      XLSX.writeFile(wb, `HighRange-BASE-Submissions-${todayKey()}.xlsx`);
+    } catch(e) { console.error(e); alert("Error exporting."); }
   }
 
   // ── INIT ───────────────────────────────────────────────────────────────────
