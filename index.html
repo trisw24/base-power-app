@@ -290,6 +290,31 @@
       cursor: pointer; font-family: inherit; flex-shrink: 0;
     }
 
+    /* Sale vs Escalation toggle */
+    .kind-row { display: flex; gap: 6px; margin-bottom: 10px; }
+    .kind-btn {
+      flex: 1; background: #111827; border: 1px solid #1f2937; border-radius: 8px;
+      padding: 8px 4px; cursor: pointer; font-family: inherit; font-size: 12px; font-weight: 700;
+      color: #6b7280; text-align: center; transition: all 0.15s;
+    }
+    .kind-btn.active-sale { background: #052e16; border-color: #16a34a; color: #4ade80; }
+    .kind-btn.active-escalation { background: #1c1a07; border-color: #d97706; color: #fbbf24; }
+    .customer-entry.is-escalation { border-color: #854d0e; background: #120f05; }
+    .esc-hint { font-size: 11px; color: #fbbf24; margin: -4px 0 8px; display: none; }
+    .customer-entry.is-escalation .esc-hint { display: block; }
+    .store-fields { display: grid; grid-template-columns: 1.3fr 1fr; gap: 8px; margin-top: 10px; }
+    .store-fields select, .store-fields input { width: 100%; min-width: 0; }
+    textarea.notes {
+      width: 100%; margin-top: 8px; background: #0a0f1a; border: 1px solid #854d0e; border-radius: 8px;
+      padding: 10px 14px; color: #f0f0f0; font-size: 14px; outline: none; font-family: inherit;
+      min-height: 70px; resize: vertical;
+    }
+    textarea.notes:focus { border-color: #fbbf24; }
+    .admin-notes { font-size: 11px; color: #fbbf24; padding: 0 0 6px 18px; line-height: 1.5; white-space: pre-wrap; }
+    .badge-esc { background: #1c1a07; border: 1px solid #854d0e; color: #fbbf24; }
+    .admin-edit-row select { flex: 1; min-width: 100px; background: #0a0f1a; border: 1px solid #1f2d3d; border-radius: 6px; padding: 7px 10px; color: #f0f0f0; font-size: 13px; font-family: inherit; }
+    .admin-edit-row textarea, .admin-add-row textarea { flex-basis: 100%; background: #0a0f1a; border: 1px solid #1f2d3d; border-radius: 6px; padding: 7px 10px; color: #f0f0f0; font-size: 13px; font-family: inherit; min-height: 50px; }
+
     .empty-state { text-align: center; color: #4b5563; padding: 40px 24px; font-size: 14px; }
     .loading { text-align: center; color: #4b5563; padding: 20px; font-size: 13px; }
     .hidden { display: none !important; }
@@ -363,8 +388,8 @@
     </div>
     <div class="form-card">
       <div class="section-header">
-        <span class="label" style="margin-bottom:0">Customer Sales</span>
-        <span class="label-sub">Select type for each</span>
+        <span class="label" style="margin-bottom:0">Customers</span>
+        <span class="label-sub">Sale or escalation for each</span>
       </div>
       <div id="customer-rows"></div>
       <button class="add-btn" onclick="addCustomer()">+ Add Customer</button>
@@ -373,6 +398,7 @@
       <span id="summary-total">🛒 0 total</span>
       <span id="summary-energy">⚡ 0 energy</span>
       <span id="summary-batteries">🔋 0 battery</span>
+      <span id="summary-esc">⚠️ 0 escalation</span>
     </div>
     <button class="submit-btn" id="submit-btn" onclick="handleSubmit()" disabled>Submit Check-In ⚡</button>
   </div>
@@ -438,6 +464,7 @@
         <div class="admin-stat"><span class="admin-stat-num" style="color:#a78bfa" id="admin-total">—</span>Total</div>
         <div class="admin-stat"><span class="admin-stat-num" style="color:#60a5fa" id="admin-enrollments">—</span>Energy</div>
         <div class="admin-stat"><span class="admin-stat-num" style="color:#22c55e" id="admin-batteries">—</span>Battery</div>
+        <div class="admin-stat"><span class="admin-stat-num" style="color:#fbbf24" id="admin-esc">—</span>Escal.</div>
         <div class="admin-stat"><span class="admin-stat-num" style="color:#9ca3af" id="admin-reps">—</span>Reps In</div>
       </div>
     </div>
@@ -485,7 +512,7 @@
       repMap[s.rep].battery += st.battery;
     });
 
-    const sorted = Object.entries(repMap).sort((a,b) => b[1].total - a[1].total);
+    const sorted = Object.entries(repMap).filter(([,s]) => s.total > 0).sort((a,b) => b[1].total - a[1].total);
     const medals = ["🥇","🥈","🥉"];
     const startLabel = new Date(start + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
     const endLabel   = new Date(end   + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
@@ -591,6 +618,19 @@
     both: { label: "⚡🔋 Both", short: "Energy Enrollment + Battery Deposit", btnClass: "active-both" },
   };
 
+  // Store chains
+  const STORES = { heb: "HEB", walmart: "Walmart", sams: "Sam's Club" };
+  function storeOptions(selected) {
+    return `<option value="">Store…</option>` + Object.entries(STORES)
+      .map(([k,v]) => `<option value="${k}" ${selected===k?"selected":""}>${v}</option>`).join("");
+  }
+  function cleanStoreNum(v) { return String(v || "").replace(/\D/g, "").slice(0, 4); }
+  function storeLabel(c) {
+    if (!c.storeChain && !c.storeNum) return "";
+    return `${STORES[c.storeChain] || c.storeChain || "?"}${c.storeNum ? " #" + c.storeNum : ""}`;
+  }
+  function isEsc(c) { return c.kind === "escalation"; }
+
   // ── SUPABASE ───────────────────────────────────────────────────────────────
   async function dbFetch(path, options = {}) {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
@@ -672,6 +712,8 @@
   }
   function contactLine(c) {
     const parts = [];
+    if (storeLabel(c)) parts.push(`🏬 ${esc(storeLabel(c))}`);
+    if (c.address) parts.push(`📍 ${esc(c.address)}`);
     if (c.email) parts.push(`✉️ <a href="mailto:${esc(c.email)}">${esc(c.email)}</a>`);
     if (c.phone) parts.push(`📞 <a href="tel:${esc(String(c.phone).replace(/\D/g,""))}">${esc(c.phone)}</a>`);
     if (c.esid) parts.push(`🔌 ESID ${esc(c.esid)}`);
@@ -679,10 +721,12 @@
   }
 
   // Calc stats from customers array
+  // Escalations are excluded from every sales number (leaderboard, totals, Supabase counts)
   function calcStats(customers) {
-    const energy = customers.filter(c => { const t = resolvedType(c); return t === "energy" || t === "both"; }).length;
-    const battery = customers.filter(c => { const t = resolvedType(c); return t === "battery" || t === "both"; }).length;
-    return { total: customers.length, energy, battery };
+    const sales = (customers || []).filter(c => !isEsc(c));
+    const energy = sales.filter(c => { const t = resolvedType(c); return t === "energy" || t === "both"; }).length;
+    const battery = sales.filter(c => { const t = resolvedType(c); return t === "battery" || t === "both"; }).length;
+    return { total: sales.length, energy, battery, escalations: (customers || []).length - sales.length };
   }
 
   // Normalize rep name: trim, title-case each word
@@ -786,7 +830,17 @@
     const id = customerCount;
     const entry = document.createElement("div");
     entry.className = "customer-entry"; entry.id = "ce-"+id;
+    // Carry store forward from the previous customer so reps don't retype it
+    const prev = [...document.querySelectorAll(".customer-entry")].pop();
+    const prevId = prev?.id.match(/ce-(\d+)/)?.[1];
+    const prevStore = prevId ? document.getElementById("cstore-"+prevId)?.value || "" : "";
+    const prevNum = prevId ? document.getElementById("cstorenum-"+prevId)?.value || "" : "";
     entry.innerHTML = `
+      <div class="kind-row">
+        <button class="kind-btn active-sale" id="ckind-${id}-sale" onclick="setKind(${id},'sale')">✅ Sale</button>
+        <button class="kind-btn" id="ckind-${id}-escalation" onclick="setKind(${id},'escalation')">⚠️ Escalation</button>
+      </div>
+      <div class="esc-hint">Not counted as a sale. Select the product the customer wanted below.</div>
       <div class="customer-entry-top">
         <input type="text" placeholder="Customer full name" id="cname-${id}" oninput="updateSummary()" />
         <button class="remove-btn" onclick="removeCustomer(${id})">✕</button>
@@ -796,14 +850,21 @@
         <button class="type-btn" id="ctype-${id}-battery" onclick="setType(${id},'battery')">🔋<br>Battery Only</button>
         <button class="type-btn" id="ctype-${id}-both" onclick="setType(${id},'both')">⚡🔋<br>Both</button>
       </div>
+      <div class="store-fields">
+        <div class="date-select-wrapper"><select id="cstore-${id}">${storeOptions(prevStore)}</select></div>
+        <input type="text" placeholder="Store # (4 digits)" id="cstorenum-${id}" value="${esc(prevNum)}" inputmode="numeric" maxlength="4" autocomplete="off" oninput="this.value=cleanStoreNum(this.value)" />
+      </div>
       <div class="contact-fields">
+        <input type="text" class="full" placeholder="Service address" id="caddr-${id}" autocomplete="off" />
         <input type="email" placeholder="Customer email" id="cemail-${id}" autocomplete="off" autocapitalize="off" />
         <input type="tel" placeholder="Phone number" id="cphone-${id}" inputmode="tel" autocomplete="off" oninput="this.value=formatPhone(this.value)" />
         <input type="text" class="full" placeholder="Meter ESID # (17 or 22 digits)" id="cesid-${id}" inputmode="numeric" autocomplete="off" oninput="this.value=cleanEsid(this.value)" />
       </div>
+      <textarea class="notes hidden" id="cnotes-${id}" placeholder="What happened? Briefly explain why the sale couldn't be completed."></textarea>
     `;
     // Default selection
     entry.dataset.saleType = "energy";
+    entry.dataset.kind = "sale";
     document.getElementById("customer-rows").appendChild(entry);
     updateSummary();
   }
@@ -818,6 +879,16 @@
     updateSummary();
   }
 
+  function setKind(id, kind) {
+    const entry = document.getElementById("ce-"+id);
+    entry.dataset.kind = kind;
+    entry.classList.toggle("is-escalation", kind === "escalation");
+    document.getElementById(`ckind-${id}-sale`).className = "kind-btn" + (kind === "sale" ? " active-sale" : "");
+    document.getElementById(`ckind-${id}-escalation`).className = "kind-btn" + (kind === "escalation" ? " active-escalation" : "");
+    document.getElementById("cnotes-"+id).classList.toggle("hidden", kind !== "escalation");
+    updateSummary();
+  }
+
   function removeCustomer(id) { document.getElementById("ce-"+id)?.remove(); updateSummary(); }
 
   function getCustomers() {
@@ -827,10 +898,15 @@
       const nameEl = document.getElementById("cname-"+id);
       if (nameEl?.value.trim()) result.push({
         name: nameEl.value.trim(),
+        kind: entry.dataset.kind || "sale",
         saleType: entry.dataset.saleType || "energy",
+        storeChain: document.getElementById("cstore-"+id)?.value || "",
+        storeNum: cleanStoreNum(document.getElementById("cstorenum-"+id)?.value || ""),
+        address: (document.getElementById("caddr-"+id)?.value || "").trim(),
         email: (document.getElementById("cemail-"+id)?.value || "").trim().toLowerCase(),
         phone: formatPhone(document.getElementById("cphone-"+id)?.value || ""),
-        esid: cleanEsid(document.getElementById("cesid-"+id)?.value || "")
+        esid: cleanEsid(document.getElementById("cesid-"+id)?.value || ""),
+        notes: entry.dataset.kind === "escalation" ? (document.getElementById("cnotes-"+id)?.value || "").trim() : ""
       });
     });
     return result;
@@ -838,11 +914,21 @@
 
   function updateSummary() {
     const customers = getCustomers();
-    const { total, energy, battery } = calcStats(customers);
-    document.getElementById("summary-total").textContent = `🛒 ${total} total`;
+    const { total, energy, battery, escalations } = calcStats(customers);
+    document.getElementById("summary-esc").textContent = `⚠️ ${escalations} escalation${escalations !== 1 ? "s" : ""}`;
+    document.getElementById("summary-total").textContent = `🛒 ${total} sales`;
     document.getElementById("summary-energy").textContent = `⚡ ${energy} energy`;
     document.getElementById("summary-batteries").textContent = `🔋 ${battery} battery`;
     document.getElementById("submit-btn").disabled = !document.getElementById("rep-name").value.trim() || customers.length === 0;
+  }
+
+  function validateCustomers(customers) {
+    for (const c of customers) {
+      if (!c.storeChain) return `Select the store (HEB, Walmart, or Sam's Club) for ${c.name}.`;
+      if (!/^\d{4}$/.test(c.storeNum)) return `Store # for ${c.name} must be exactly 4 digits.`;
+      if (isEsc(c) && !c.notes) return `${c.name} is an escalation — add a quick note on what happened.`;
+    }
+    return null;
   }
 
   // ── SUBMIT ─────────────────────────────────────────────────────────────────
@@ -852,6 +938,8 @@
     const customers = getCustomers();
     const selectedDate = document.getElementById("submission-date").value;
     if (!repName || customers.length === 0) return;
+    const problem = validateCustomers(customers);
+    if (problem) { alert(problem); return; }
     btn.disabled = true; btn.textContent = "Saving...";
     try {
       const existing = await dbFetch(`submissions?date=eq.${selectedDate}&order=created_at.asc`);
@@ -860,12 +948,12 @@
         conflictEntry = match;
         document.getElementById("conflict-sub").textContent = `You already have a submission for ${formatDateLabel(selectedDate)}. What would you like to do?`;
         document.getElementById("conflict-existing-list").innerHTML = match.customers.map(c =>
-          `<div class="conflict-customer"><span style="color:#374151">•</span><span>${c.name}</span><span style="font-size:10px;color:#6b7280">${resolveSaleType(c)}</span></div>`
+          `<div class="conflict-customer"><span style="color:#374151">•</span><span>${esc(c.name)}</span><span style="font-size:10px;color:${isEsc(c)?"#fbbf24":"#6b7280"}">${isEsc(c) ? "⚠️ Escalation" : resolveSaleType(c)}</span></div>`
         ).join("");
         showView("conflict");
         btn.disabled = false; btn.textContent = "Submit Check-In ⚡"; return;
       }
-      const { total, energy, battery } = calcStats(customers);
+      const { total, energy, battery, escalations } = calcStats(customers);
       const now = new Date();
       const submittedDate = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
       const submittedTime = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
@@ -878,7 +966,7 @@
       });
       const dateLabel = selectedDate === todayKey() ? "today" : formatDateLabel(selectedDate);
       document.getElementById("success-title").textContent = "Submitted!";
-      document.getElementById("success-msg").textContent = `${total} sale(s) logged for ${dateLabel} — ${energy} energy enrollment(s), ${battery} battery deposit(s).`;
+      document.getElementById("success-msg").textContent = `${total} sale(s) logged for ${dateLabel} — ${energy} energy enrollment(s), ${battery} battery deposit(s).` + (escalations ? ` ${escalations} escalation(s) recorded (not counted as sales).` : "");
       showView("success");
       pushSlackLeaderboard();
     } catch(e) {
@@ -891,11 +979,11 @@
     if (!conflictEntry) return;
     const newCustomers = getCustomers();
     const merged = [...conflictEntry.customers, ...newCustomers];
-    const { energy, battery } = calcStats(merged);
+    const { total, energy, battery, escalations } = calcStats(merged);
     try {
       await updateSubmission(conflictEntry.id, { customers: merged, enrollments: energy, batteries: battery });
       document.getElementById("success-title").textContent = "Customers Added!";
-      document.getElementById("success-msg").textContent = `${newCustomers.length} customer(s) added. Total: ${merged.length} sales, ${energy} energy, ${battery} battery.`;
+      document.getElementById("success-msg").textContent = `${newCustomers.length} customer(s) added. Total: ${total} sales, ${energy} energy, ${battery} battery` + (escalations ? `, ${escalations} escalation(s).` : ".");
       showView("success"); conflictEntry = null;
       pushSlackLeaderboard();
     } catch(e) { alert("Error updating."); }
@@ -905,14 +993,14 @@
     if (!conflictEntry) return;
     if (!confirm("Replace your previous submission with this new one?")) return;
     const customers = getCustomers();
-    const { energy, battery } = calcStats(customers);
+    const { total, energy, battery, escalations } = calcStats(customers);
     try {
       await updateSubmission(conflictEntry.id, {
         customers, enrollments: energy, batteries: battery,
         time: new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
       });
       document.getElementById("success-title").textContent = "Submission Replaced!";
-      document.getElementById("success-msg").textContent = `${customers.length} sale(s) — ${energy} energy, ${battery} battery. Previous entry overwritten.`;
+      document.getElementById("success-msg").textContent = `${total} sale(s) — ${energy} energy, ${battery} battery` + (escalations ? `, ${escalations} escalation(s)` : "") + `. Previous entry overwritten.`;
       showView("success"); conflictEntry = null;
       pushSlackLeaderboard();
     } catch(e) { alert("Error updating."); }
@@ -931,8 +1019,9 @@
     try {
       const all = await getAllSubmissions();
       const todayData = all.filter(s => s.date === todayKey());
-      let tE = 0, tB = 0, tAll = 0;
-      todayData.forEach(s => { const st = calcStats(s.customers); tE += st.energy; tB += st.battery; tAll += st.total; });
+      let tE = 0, tB = 0, tAll = 0, tEsc = 0;
+      todayData.forEach(s => { const st = calcStats(s.customers); tE += st.energy; tB += st.battery; tAll += st.total; tEsc += st.escalations; });
+      document.getElementById("admin-esc").textContent = tEsc;
       document.getElementById("admin-total").textContent = tAll;
       document.getElementById("admin-enrollments").textContent = tE;
       document.getElementById("admin-batteries").textContent = tB;
@@ -949,14 +1038,14 @@
         const data = byDate[day];
         const isToday = day === todayKey();
         const label = isToday ? "Today — " + formatDateLabel(day) : formatDateLabel(day);
-        let dE = 0, dB = 0, dAll = 0;
-        data.forEach(s => { const st = calcStats(s.customers); dE += st.energy; dB += st.battery; dAll += st.total; });
+        let dE = 0, dB = 0, dAll = 0, dEsc = 0;
+        data.forEach(s => { const st = calcStats(s.customers); dE += st.energy; dB += st.battery; dAll += st.total; dEsc += st.escalations; });
         const block = document.createElement("div");
         block.className = "day-block";
         block.innerHTML = `
           <div class="day-header">
             <span class="day-label">${label}</span>
-            <span class="day-totals">${dAll} total · ⚡${dE} · 🔋${dB}</span>
+            <span class="day-totals">${dAll} sales · ⚡${dE} · 🔋${dB}${dEsc ? ` · ⚠️${dEsc}` : ""}</span>
           </div>
           ${data.map(entry => buildEntryCard(entry)).join("")}
         `;
@@ -972,12 +1061,16 @@
   }
 
   function buildEntryCard(entry) {
-    const { total, energy, battery } = calcStats(entry.customers);
+    const { total, energy, battery, escalations } = calcStats(entry.customers);
     const customerLines = entry.customers.map((c, i) => `
       <div class="admin-customer-line" id="acl-${entry.id}-${i}">
-        <span style="color:#374151;font-size:16px">•</span>
-        <span class="customer-name-span">${c.name}</span>
+        <span style="color:${isEsc(c)?"#fbbf24":"#374151"};font-size:16px">•</span>
+        <span class="customer-name-span">${esc(c.name)}${isEsc(c) ? ` <span style="color:#fbbf24;font-size:11px;font-weight:700">ESCALATION</span>` : ""}</span>
         <span style="font-size:13px">${saleTypeLabel(resolvedType(c))}</span>
+        <select class="admin-type-select" onchange="adminChangeKind('${entry.id}',${i},this.value)">
+          <option value="sale" ${!isEsc(c)?"selected":""}>✅ Sale</option>
+          <option value="escalation" ${isEsc(c)?"selected":""}>⚠️ Escal.</option>
+        </select>
         <select class="admin-type-select" onchange="adminChangeType('${entry.id}',${i},this.value)">
           <option value="energy" ${resolvedType(c)==="energy"?"selected":""}>⚡ Energy</option>
           <option value="battery" ${resolvedType(c)==="battery"?"selected":""}>🔋 Battery</option>
@@ -987,11 +1080,16 @@
         <button class="del-customer-btn" onclick="adminDeleteCustomer('${entry.id}',${i})" title="Remove">✕</button>
       </div>
       <div class="admin-contact">${contactLine(c)}</div>
+      ${c.notes ? `<div class="admin-notes">📝 ${esc(c.notes)}</div>` : ""}
       <div class="admin-edit-row" id="aedit-${entry.id}-${i}">
         <input type="text" id="ename-${entry.id}-${i}" value="${esc(c.name)}" placeholder="Customer name" />
+        <select id="estore-${entry.id}-${i}">${storeOptions(c.storeChain)}</select>
+        <input type="text" id="estorenum-${entry.id}-${i}" value="${esc(c.storeNum || "")}" placeholder="Store #" inputmode="numeric" maxlength="4" oninput="this.value=cleanStoreNum(this.value)" />
+        <input type="text" id="eaddr-${entry.id}-${i}" value="${esc(c.address || "")}" placeholder="Address" />
         <input type="email" id="eemail-${entry.id}-${i}" value="${esc(c.email || "")}" placeholder="Email" />
         <input type="tel" id="ephone-${entry.id}-${i}" value="${esc(c.phone || "")}" placeholder="Phone" oninput="this.value=formatPhone(this.value)" />
         <input type="text" id="eesid-${entry.id}-${i}" value="${esc(c.esid || "")}" placeholder="ESID #" inputmode="numeric" oninput="this.value=cleanEsid(this.value)" />
+        <textarea id="enotes-${entry.id}-${i}" placeholder="Escalation notes">${esc(c.notes || "")}</textarea>
         <button class="admin-add-confirm" onclick="adminSaveCustomer('${entry.id}',${i})">Save</button>
       </div>
     `).join("");
@@ -999,21 +1097,29 @@
     return `
       <div class="entry-card" id="ecard-${entry.id}">
         <div class="entry-top">
-          <span class="entry-rep">${entry.rep}</span>
+          <span class="entry-rep">${esc(entry.rep)}</span>
           <div class="entry-meta">
             <span class="entry-time">${entry.time}</span>
             <button class="delete-entry-btn" onclick="adminDeleteEntry('${entry.id}','${entry.rep}')">🗑 Delete submission</button>
           </div>
         </div>
         <div class="entry-stats">
-          <span class="badge badge-total">🛒 ${total} total</span>
+          <span class="badge badge-total">🛒 ${total} sales</span>
           <span class="badge badge-energy">⚡ ${energy} energy</span>
           ${battery > 0 ? `<span class="badge badge-battery">🔋 ${battery} battery</span>` : ""}
+          ${escalations > 0 ? `<span class="badge badge-esc">⚠️ ${escalations} escalation${escalations !== 1 ? "s" : ""}</span>` : ""}
         </div>
         <div class="customer-list" id="clist-${entry.id}">
           ${customerLines}
           <div class="admin-add-row">
             <input type="text" placeholder="Add customer name..." id="newcust-${entry.id}" />
+            <select class="admin-add-type" id="newkind-${entry.id}">
+              <option value="sale">✅ Sale</option>
+              <option value="escalation">⚠️ Escalation</option>
+            </select>
+            <select class="admin-add-type" id="newstore-${entry.id}">${storeOptions("")}</select>
+            <input type="text" placeholder="Store #" id="newstorenum-${entry.id}" inputmode="numeric" maxlength="4" oninput="this.value=cleanStoreNum(this.value)" />
+            <input type="text" placeholder="Address" id="newaddr-${entry.id}" />
             <input type="email" placeholder="Email" id="newemail-${entry.id}" />
             <input type="tel" placeholder="Phone" id="newphone-${entry.id}" oninput="this.value=formatPhone(this.value)" />
             <input type="text" placeholder="ESID #" id="newesid-${entry.id}" inputmode="numeric" oninput="this.value=cleanEsid(this.value)" />
@@ -1022,6 +1128,7 @@
               <option value="battery">🔋 Battery</option>
               <option value="both">⚡🔋 Both</option>
             </select>
+            <textarea placeholder="Escalation notes (if escalation)" id="newnotes-${entry.id}"></textarea>
             <button class="admin-add-confirm" onclick="adminAddCustomer('${entry.id}')">Add</button>
           </div>
         </div>
@@ -1073,6 +1180,20 @@
     } catch(e) { alert("Error updating type."); }
   }
 
+  async function adminChangeKind(entryId, idx, kind) {
+    try {
+      const rows = await dbFetch(`submissions?id=eq.${entryId}`);
+      if (!rows.length) return;
+      const entry = rows[0];
+      const updated = entry.customers.map((c,i) => i === idx ? { ...c, kind } : c);
+      const { energy, battery } = calcStats(updated);
+      await updateSubmission(entryId, { customers: updated, enrollments: energy, batteries: battery });
+      refreshEntryCard(entryId, { ...entry, customers: updated, enrollments: energy, batteries: battery });
+      await refreshAdminTotals();
+      pushSlackLeaderboard();
+    } catch(e) { alert("Error updating."); }
+  }
+
   async function adminAddCustomer(entryId) {
     const name = document.getElementById("newcust-"+entryId)?.value.trim();
     const saleType = document.getElementById("newtype-"+entryId)?.value || "energy";
@@ -1081,8 +1202,13 @@
       const rows = await dbFetch(`submissions?id=eq.${entryId}`);
       if (!rows.length) return;
       const entry = rows[0];
+      const kind = document.getElementById("newkind-"+entryId)?.value || "sale";
       const updated = [...entry.customers, {
-        name, saleType,
+        name, saleType, kind,
+        storeChain: document.getElementById("newstore-"+entryId)?.value || "",
+        storeNum: cleanStoreNum(document.getElementById("newstorenum-"+entryId)?.value || ""),
+        address: (document.getElementById("newaddr-"+entryId)?.value || "").trim(),
+        notes: kind === "escalation" ? (document.getElementById("newnotes-"+entryId)?.value || "").trim() : "",
         email: (document.getElementById("newemail-"+entryId)?.value || "").trim().toLowerCase(),
         phone: formatPhone(document.getElementById("newphone-"+entryId)?.value || ""),
         esid: cleanEsid(document.getElementById("newesid-"+entryId)?.value || "")
@@ -1109,9 +1235,13 @@
       const entry = rows[0];
       const updated = entry.customers.map((c,i) => i === idx ? {
         ...c, name,
+        storeChain: val("estore"),
+        storeNum: cleanStoreNum(val("estorenum")),
+        address: val("eaddr"),
         email: val("eemail").toLowerCase(),
         phone: formatPhone(val("ephone")),
-        esid: cleanEsid(val("eesid"))
+        esid: cleanEsid(val("eesid")),
+        notes: val("enotes")
       } : c);
       await updateSubmission(entryId, { customers: updated });
       refreshEntryCard(entryId, { ...entry, customers: updated });
@@ -1130,8 +1260,9 @@
     try {
       const all = await getAllSubmissions();
       const todayData = all.filter(s => s.date === todayKey());
-      let tE = 0, tB = 0, tAll = 0;
-      todayData.forEach(s => { const st = calcStats(s.customers); tE += st.energy; tB += st.battery; tAll += st.total; });
+      let tE = 0, tB = 0, tAll = 0, tEsc = 0;
+      todayData.forEach(s => { const st = calcStats(s.customers); tE += st.energy; tB += st.battery; tAll += st.total; tEsc += st.escalations; });
+      document.getElementById("admin-esc").textContent = tEsc;
       document.getElementById("admin-total").textContent = tAll;
       document.getElementById("admin-enrollments").textContent = tE;
       document.getElementById("admin-batteries").textContent = tB;
@@ -1160,43 +1291,56 @@
       const all = await getAllSubmissions();
       if (all.length === 0) { alert("No submissions to export."); return; }
 
-      const header = ["Week Ending", "Date", "Rep Name", "Customer Name", "Sale Type", "Customer Email", "Customer Phone", "Meter ESID", "Submitted At"];
+      const header = ["Week Ending", "Date", "Record Type", "Rep Name", "Customer Name", "Sale Type", "Store", "Store #", "Customer Address", "Customer Email", "Customer Phone", "Meter ESID", "Escalation Notes", "Submitted At"];
+      const TEXT_COLS = [7, 11]; // Store # and ESID stay text (leading zeros / long numbers)
       const weeks = {};
       all.forEach(entry => {
         const wk = getWeekStartKey(entry.date);
-        if (!weeks[wk]) weeks[wk] = [];
-        entry.customers.forEach(c => {
-          weeks[wk].push([
+        if (!weeks[wk]) weeks[wk] = { sales: [], esc: [] };
+        (entry.customers || []).forEach(c => {
+          const row = [
             getWeekEnding(entry.date),
             formatDateLabel(entry.date),
+            isEsc(c) ? "ESCALATION" : "SALE",
             entry.rep,
             c.name,
             resolveSaleType(c),
+            STORES[c.storeChain] || c.storeChain || "",
+            c.storeNum || "",
+            c.address || "",
             c.email || "",
             c.phone || "",
             c.esid || "",
+            c.notes || "",
             entry.time
-          ]);
+          ];
+          (isEsc(c) ? weeks[wk].esc : weeks[wk].sales).push(row);
         });
       });
 
+      const byDateRep = (a,b) => new Date(a[1]) - new Date(b[1]) || a[3].localeCompare(b[3]);
       const wb = XLSX.utils.book_new();
-      const summary = [["Week (Mon–Sun)", "Total Sales", "Energy", "Battery", "Reps"]];
+      const summary = [["Week (Mon–Sun)", "Total Sales", "Energy", "Battery", "Reps", "Escalations"]];
       Object.keys(weeks).sort().reverse().forEach(wk => {
-        const rows = weeks[wk].sort((a,b) => new Date(a[1]) - new Date(b[1]) || a[2].localeCompare(b[2]));
-        const energy = rows.filter(r => r[4] !== TYPES.battery.short).length;
-        const battery = rows.filter(r => r[4] !== TYPES.energy.short).length;
-        const reps = new Set(rows.map(r => r[2])).size;
-        const data = [header, ...rows, [], ["TOTALS", "", `${reps} reps`, `${rows.length} sales`, `${energy} energy / ${battery} battery`]];
+        const sales = weeks[wk].sales.sort(byDateRep);
+        const escs = weeks[wk].esc.sort(byDateRep);
+        const energy = sales.filter(r => r[5] !== TYPES.battery.short).length;
+        const battery = sales.filter(r => r[5] !== TYPES.energy.short).length;
+        const reps = new Set(sales.map(r => r[3])).size;
+        const data = [header, ...sales, [], ["SALES TOTALS", "", "", `${reps} reps`, `${sales.length} sales`, `${energy} energy / ${battery} battery`]];
+        if (escs.length) {
+          data.push([], [], ["⚠️ ESCALATIONS — NOT COUNTED AS SALES"], header, ...escs, [], ["ESCALATION TOTAL", "", "", "", `${escs.length} escalation${escs.length !== 1 ? "s" : ""}`]);
+        }
         const ws = XLSX.utils.aoa_to_sheet(data);
-        ws["!cols"] = [14, 14, 20, 24, 20, 28, 16, 24, 12].map(w => ({ wch: w }));
-        // keep ESID as text so Excel doesn't mangle long numbers
-        for (let r = 1; r <= rows.length; r++) { const cell = ws[XLSX.utils.encode_cell({ r, c: 7 })]; if (cell) cell.t = "s"; }
+        ws["!cols"] = [14, 16, 12, 20, 24, 22, 12, 9, 34, 28, 16, 24, 44, 12].map(w => ({ wch: w }));
+        for (let r = 1; r < data.length; r++) TEXT_COLS.forEach(col => {
+          const cell = ws[XLSX.utils.encode_cell({ r, c: col })]; if (cell) cell.t = "s";
+        });
         XLSX.utils.book_append_sheet(wb, ws, weekTabName(wk).slice(0, 31));
-        summary.push([weekTabName(wk), rows.length, energy, battery, reps]);
+        summary.push([weekTabName(wk), sales.length, energy, battery, reps, escs.length]);
       });
       const sws = XLSX.utils.aoa_to_sheet(summary);
-      sws["!cols"] = [{ wch: 18 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 8 }];
+      sws["!cols"] = [{ wch: 18 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 8 }, { wch: 12 }];
       XLSX.utils.book_append_sheet(wb, sws, "Summary");
       // Put Summary first
       wb.SheetNames.unshift(wb.SheetNames.pop());
